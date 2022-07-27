@@ -1,4 +1,4 @@
-use std::{ops::Range, str::Chars};
+use std::str::Chars;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum TokenType {
@@ -55,11 +55,12 @@ pub enum TokenType {
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Token {
     pub ty: TokenType,
     pub line: u32,
-    pub span: Range<u32>,
+    pub start: u32,
+    pub end: u32,
 }
 
 pub struct Scanner<'a> {
@@ -77,7 +78,10 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn consume_while<P: FnMut(char) -> bool>(&mut self, mut predicate: P) -> Option<char> {
+    fn consume_while<P>(&mut self, mut predicate: P) -> Option<char>
+    where
+        P: FnMut(char) -> bool,
+    {
         while !self.is_empty() {
             let peeked = self.peek();
             if !predicate(peeked) {
@@ -196,7 +200,8 @@ impl<'a> Iterator for Scanner<'a> {
             Token {
                 ty,
                 line,
-                span: start as u32..end as u32,
+                start: start as u32,
+                end: end as u32,
             }
         })
     }

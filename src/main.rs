@@ -1,10 +1,14 @@
 pub mod ast;
+pub mod interpreter;
 pub mod parser;
 pub mod scanner;
+pub mod value;
 
+use std::io::{stdin, BufRead, BufReader};
+
+use interpreter::eval;
 use parser::Parser;
 use scanner::{Scanner, TokenType};
-use std::io::{stdin, BufRead, BufReader};
 
 pub type DynResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -34,13 +38,16 @@ fn run_file(path: &str) -> DynResult<()> {
 }
 
 fn run(input: &str) -> DynResult<()> {
-    for expression in Parser::new(
+    for result in Parser::new(
         input,
-        Scanner::new(input).filter(|token| token.ty != TokenType::Comment),
+        Scanner::new(input).filter(|token| token.tt != TokenType::Comment),
     ) {
-        println!("{:?}", expression);
+        match result {
+            Ok(expression) => println!("{:?}", eval(expression)),
+            Err(error) => println!("{:?}", error),
+        }
         // let lexeme = &input[token.start as usize..token.end as usize];
-        // match token.ty {
+        // match token.tt {
         //     TokenType::Unknown => {
         //         eprintln!("Unknown token {} at line {}.", lexeme, token.line);
         //     }
@@ -52,17 +59,9 @@ fn run(input: &str) -> DynResult<()> {
         //         );
         //     }
         //     _ => {
-        //         println!("'{}' :: {:?}", lexeme, token.ty,);
+        //         println!("'{}' :: {:?}", lexeme, token.tt,);
         //     }
         // }
     }
     Ok(())
-}
-
-#[derive(Debug)]
-pub enum Value {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Nil,
 }

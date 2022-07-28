@@ -57,7 +57,12 @@ pub enum TokenType {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
-    pub ty: TokenType,
+    pub tt: TokenType,
+    pub span: Span,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Span {
     pub line: u32,
     pub start: u32,
     pub end: u32,
@@ -172,7 +177,7 @@ impl<'a> Iterator for Scanner<'a> {
         let start = self.current_index();
         let line = self.line;
         self.next_char().map(|ch| {
-            let ty = match ch {
+            let tt = match ch {
                 '/' => match self.peek() {
                     '/' => self.comment(),
                     _ => TokenType::Slash,
@@ -198,10 +203,12 @@ impl<'a> Iterator for Scanner<'a> {
             };
             let end = self.current_index();
             Token {
-                ty,
-                line,
-                start: start as u32,
-                end: end as u32,
+                tt,
+                span: Span {
+                    line,
+                    start: start as u32,
+                    end: end as u32,
+                },
             }
         })
     }

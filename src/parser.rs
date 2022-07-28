@@ -3,12 +3,13 @@ use std::iter::Peekable;
 use crate::{
     ast::{BinaryOperator, Expression, UnaryOperator},
     scanner::{Token, TokenType},
-    Value,
+    value::Value,
 };
 
 #[derive(Debug)]
 pub enum ParseError {
     ExpectedPrimary(Option<Token>),
+    Expected(TokenType, Option<Token>),
     MalformedNumber(Token),
     MalformedString(Token),
 }
@@ -107,7 +108,7 @@ where
 
     fn primary(&mut self) -> Result<Expression, ParseError> {
         match self.tokens.next() {
-            Some(token) => match token.ty {
+            Some(token) => match token.tt {
                 TokenType::Nil => Ok(Expression::Literal(Value::Nil)),
                 TokenType::True => Ok(Expression::Literal(Value::Boolean(true))),
                 TokenType::False => Ok(Expression::Literal(Value::Boolean(false))),
@@ -117,6 +118,11 @@ where
                 TokenType::String => Ok(Expression::Literal(Value::String(
                     self.parse_string(token)?,
                 ))),
+                TokenType::LeftParen => {
+                    let expression = self.expression()?;
+                    self.expect(TokenType::RightParen)?;
+                    Ok(Expression::Grouping(Box::new(expression)))
+                }
                 _ => Err(ParseError::ExpectedPrimary(Some(token))),
             },
             None => Err(ParseError::ExpectedPrimary(None)),
@@ -128,8 +134,8 @@ where
         V: Copy,
     {
         self.tokens.peek().copied().and_then(|token| {
-            for (ty, value) in values.iter() {
-                if *ty == token.ty {
+            for (tt, value) in values.iter() {
+                if *tt == token.tt {
                     self.tokens.next();
                     return Some(*value);
                 }
@@ -138,20 +144,44 @@ where
         })
     }
 
+    fn expect(&mut self, expected: TokenType) -> Result<(), ParseError> {
+        match self.tokens.peek().copied() {
+            Some(token) if token.tt == expected => {
+                self.tokens.next();
+                Ok(())
+            }
+            token => Err(ParseError::Expected(expected, token)),
+        }
+    }
+
     fn parse_number(&self, token: Token) -> Result<f64, ParseError> {
-        self.input[token.start as usize..token.end as usize]
+        self.input[token.span.start as usize..token.span.end as usize]
             .parse()
             .map_err(|_| ParseError::MalformedNumber(token))
     }
 
     fn parse_string(&self, token: Token) -> Result<String, ParseError> {
-        let str = &self.input[token.start as usize..token.end as usize];
+        let str = &self.input[token.span.start as usize..token.span.end as usize];
         if !str.ends_with('"') {
             return Err(ParseError::MalformedString(token));
         }
         Ok(String::from(
-            &self.input[token.start as usize + 1..token.end as usize - 1],
+            &self.input[token.span.start as usize + 1..token.span.end as usize - 1],
         ))
+    }
+
+    fn synchronize(&mut self) {
+        while let Some(token) = self.tokens.next() {
+            if let TokenType::Semicolon = token.tt {
+                return;
+            }
+            match self.tokens.peek() {
+                Some(token) if starts_statement(token.tt) => {
+                    return;
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -163,9 +193,26 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.tokens.peek().is_some() {
-            Some(self.expression())
+            Some(self.expression().map_err(|error| {
+                self.synchronize();
+                error
+            }))
         } else {
             None
         }
     }
+}
+
+fn starts_statement(tt: TokenType) -> bool {
+    matches!(
+        tt,
+        TokenType::Class
+            | TokenType::If
+            | TokenType::Var
+            | TokenType::For
+            | TokenType::Fun
+            | TokenType::While
+            | TokenType::Print
+            | TokenType::Return
+    )
 }

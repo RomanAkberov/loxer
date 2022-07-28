@@ -1,7 +1,9 @@
 use std::str::Chars;
 
+use crate::span::{Span, Spanned};
+
 #[derive(Copy, Clone, PartialEq, Debug)]
-pub enum TokenType {
+pub enum Token {
     // Single-character tokens.
     LeftParen,
     RightParen,
@@ -55,23 +57,9 @@ pub enum TokenType {
     Unknown,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct Token {
-    pub tt: TokenType,
-    pub span: Span,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Span {
-    pub line: u32,
-    pub start: u32,
-    pub end: u32,
-}
-
 pub struct Scanner<'a> {
     input: &'a str,
     chars: Chars<'a>,
-    line: u32,
 }
 
 impl<'a> Scanner<'a> {
@@ -79,7 +67,6 @@ impl<'a> Scanner<'a> {
         Self {
             input,
             chars: input.chars(),
-            line: 1,
         }
     }
 
@@ -97,7 +84,7 @@ impl<'a> Scanner<'a> {
         None
     }
 
-    fn if_peek(&mut self, ch: char, matched: TokenType, unmatched: TokenType) -> TokenType {
+    fn if_peek(&mut self, ch: char, matched: Token, unmatched: Token) -> Token {
         if self.peek() == ch {
             self.next_char();
             matched
@@ -107,11 +94,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn next_char(&mut self) -> Option<char> {
-        let ch = self.chars.next();
-        if ch == Some('\n') {
-            self.line += 1;
-        }
-        ch
+        self.chars.next()
     }
 
     fn is_empty(&self) -> bool {
@@ -126,90 +109,85 @@ impl<'a> Scanner<'a> {
         self.input.len() - self.chars.as_str().len()
     }
 
-    fn number(&mut self) -> TokenType {
+    fn number(&mut self) -> Token {
         if let Some('.') = self.consume_while(|ch| ch.is_ascii_digit() || ch == '.') {
             self.consume_while(|ch| ch.is_ascii_digit());
         }
-        TokenType::Number
+        Token::Number
     }
 
-    fn comment(&mut self) -> TokenType {
+    fn comment(&mut self) -> Token {
         self.consume_while(|ch| ch != '\n');
-        TokenType::Comment
+        Token::Comment
     }
 
-    fn string(&mut self) -> TokenType {
+    fn string(&mut self) -> Token {
         if self.consume_while(|ch| ch != '"').is_some() {
             self.next_char();
         }
-        TokenType::String
+        Token::String
     }
 
-    fn identifier_or_keyword(&mut self, start: usize) -> TokenType {
+    fn identifier_or_keyword(&mut self, start: usize) -> Token {
         self.consume_while(is_alphanumeric);
         match &self.input[start..self.current_index()] {
-            "and" => TokenType::And,
-            "class" => TokenType::Class,
-            "else" => TokenType::Else,
-            "false" => TokenType::False,
-            "for" => TokenType::For,
-            "fun" => TokenType::Fun,
-            "if" => TokenType::If,
-            "nil" => TokenType::Nil,
-            "or" => TokenType::Or,
-            "print" => TokenType::Print,
-            "return" => TokenType::Return,
-            "super" => TokenType::Super,
-            "this" => TokenType::This,
-            "true" => TokenType::True,
-            "var" => TokenType::Var,
-            "while" => TokenType::While,
-            _ => TokenType::Identifier,
+            "and" => Token::And,
+            "class" => Token::Class,
+            "else" => Token::Else,
+            "false" => Token::False,
+            "for" => Token::For,
+            "fun" => Token::Fun,
+            "if" => Token::If,
+            "nil" => Token::Nil,
+            "or" => Token::Or,
+            "print" => Token::Print,
+            "return" => Token::Return,
+            "super" => Token::Super,
+            "this" => Token::This,
+            "true" => Token::True,
+            "var" => Token::Var,
+            "while" => Token::While,
+            _ => Token::Identifier,
         }
     }
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Token;
+    type Item = Spanned<Token>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.consume_while(|ch| ch.is_ascii_whitespace());
         let start = self.current_index();
-        let line = self.line;
         self.next_char().map(|ch| {
-            let tt = match ch {
+            let token = match ch {
                 '/' => match self.peek() {
                     '/' => self.comment(),
-                    _ => TokenType::Slash,
+                    _ => Token::Slash,
                 },
-                '(' => TokenType::LeftParen,
-                ')' => TokenType::RightParen,
-                '{' => TokenType::LeftBrace,
-                '}' => TokenType::RightBrace,
-                ',' => TokenType::Comma,
-                '.' => TokenType::Dot,
-                '-' => TokenType::Minus,
-                '+' => TokenType::Plus,
-                ';' => TokenType::Semicolon,
-                '*' => TokenType::Star,
-                '!' => self.if_peek('=', TokenType::BangEqual, TokenType::Bang),
-                '=' => self.if_peek('=', TokenType::EqualEqual, TokenType::Equal),
-                '<' => self.if_peek('=', TokenType::LessEqual, TokenType::Less),
-                '>' => self.if_peek('=', TokenType::GreaterEqual, TokenType::Greater),
+                '(' => Token::LeftParen,
+                ')' => Token::RightParen,
+                '{' => Token::LeftBrace,
+                '}' => Token::RightBrace,
+                ',' => Token::Comma,
+                '.' => Token::Dot,
+                '-' => Token::Minus,
+                '+' => Token::Plus,
+                ';' => Token::Semicolon,
+                '*' => Token::Star,
+                '!' => self.if_peek('=', Token::BangEqual, Token::Bang),
+                '=' => self.if_peek('=', Token::EqualEqual, Token::Equal),
+                '<' => self.if_peek('=', Token::LessEqual, Token::Less),
+                '>' => self.if_peek('=', Token::GreaterEqual, Token::Greater),
                 '"' => self.string(),
                 ch if ch.is_ascii_digit() => self.number(),
                 ch if is_alphabetic(ch) => self.identifier_or_keyword(start),
-                _ => TokenType::Unknown,
+                _ => Token::Unknown,
             };
-            let end = self.current_index();
-            Token {
-                tt,
-                span: Span {
-                    line,
-                    start: start as u32,
-                    end: end as u32,
-                },
-            }
+            let span = Span {
+                start: start as i32,
+                end: self.current_index() as i32,
+            };
+            Spanned { value: token, span }
         })
     }
 }

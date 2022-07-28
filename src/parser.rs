@@ -2,79 +2,82 @@ use std::iter::Peekable;
 
 use crate::{
     ast::{BinaryOperator, Expression, UnaryOperator},
-    scanner::{Token, TokenType},
+    scanner::Token,
+    span::{Span, Spanned},
     value::Value,
 };
 
 #[derive(Debug)]
-pub enum ParseError {
-    ExpectedPrimary(Option<Token>),
-    Expected(TokenType, Option<Token>),
-    MalformedNumber(Token),
-    MalformedString(Token),
+pub enum Error {
+    ExpectedPrimary,
+    Expected(Token),
+    MalformedNumber,
+    MalformedString,
 }
 
 pub struct Parser<'a, I>
 where
-    I: Iterator<Item = Token>,
+    I: Iterator<Item = Spanned<Token>>,
 {
     input: &'a str,
     tokens: Peekable<I>,
+    end: i32,
 }
 
 impl<'a, I> Parser<'a, I>
 where
-    I: Iterator<Item = Token>,
+    I: Iterator<Item = Spanned<Token>>,
 {
     pub fn new(input: &'a str, tokens: I) -> Self {
         Self {
             input,
             tokens: tokens.peekable(),
+            end: 0,
         }
     }
 
-    fn expression(&mut self) -> Result<Expression, ParseError> {
+    fn expression(&mut self) -> Result<Expression, Error> {
         self.equality()
     }
 
-    fn equality(&mut self) -> Result<Expression, ParseError> {
+    fn equality(&mut self) -> Result<Expression, Error> {
         self.binary(
             Self::comparison,
             &[
-                (TokenType::BangEqual, BinaryOperator::NotEqual),
-                (TokenType::EqualEqual, BinaryOperator::Equal),
+                (Token::BangEqual, BinaryOperator::NotEqual),
+                (Token::EqualEqual, BinaryOperator::Equal),
             ],
         )
     }
 
-    fn comparison(&mut self) -> Result<Expression, ParseError> {
+    fn comparison(&mut self) -> Result<Expression, Error> {
         self.binary(
             Self::term,
             &[
-                (TokenType::Greater, BinaryOperator::Greater),
-                (TokenType::GreaterEqual, BinaryOperator::GreaterEqual),
-                (TokenType::Less, BinaryOperator::Less),
-                (TokenType::LessEqual, BinaryOperator::LessEqual),
+                (Token::Greater, BinaryOperator::Greater),
+                (Token::GreaterEqual, BinaryOperator::GreaterEqual),
+                (Token::Less, BinaryOperator::Less),
+                (Token::LessEqual, BinaryOperator::LessEqual),
             ],
         )
     }
 
-    fn term(&mut self) -> Result<Expression, ParseError> {
+    fn term(&mut self) -> Result<Expression, Error> {
         self.binary(
             Self::factor,
             &[
-                (TokenType::Minus, BinaryOperator::Sub),
-                (TokenType::Plus, BinaryOperator::Add),
+                (Token::Minus, BinaryOperator::Sub),
+                (Token::Plus, BinaryOperator::Add),
             ],
         )
     }
 
-    fn factor(&mut self) -> Result<Expression, ParseError> {
+    fn factor(&mut self) -> Result<Expression, Error> {
         self.binary(
             Self::unary,
             &[
-                (TokenType::Slash, BinaryOperator::Div),
-                (TokenType::Star, BinaryOperator::Mul),
+                (Token::Slash, BinaryOperator::Div),
+                (Token::Star, BinaryOperator::Mul),
             ],
         )
     }
@@ -82,10 +85,10 @@ where
     fn binary<O>(
         &mut self,
         mut operand: O,
-        operators: &[(TokenType, BinaryOperator)],
-    ) -> Result<Expression, ParseError>
+        operators: &[(Token, BinaryOperator)],
+    ) -> Result<Expression, Error>
     where
-        O: FnMut(&mut Self) -> Result<Expression, ParseError>,
+        O: FnMut(&mut Self) -> Result<Expression, Error>,
     {
         let mut left = operand(self)?;
         while let Some(operator) = self.match_one_of(operators) {
@@ -95,10 +98,10 @@ where
         Ok(left)
     }
 
-    fn unary(&mut self) -> Result<Expression, ParseError> {
+    fn unary(&mut self) -> Result<Expression, Error> {
         if let Some(operator) = self.match_one_of(&[
-            (TokenType::Minus, UnaryOperator::Neg),
-            (TokenType::Bang, UnaryOperator::Not),
+            (Token::Minus, UnaryOperator::Neg),
+            (Token::Bang, UnaryOperator::Not),
         ]) {
             let expr = self.unary()?;
             return Ok(Expression::Unary(operator, Box::new(expr)));
@@ -106,37 +109,37 @@ where
         self.primary()
     }
 
-    fn primary(&mut self) -> Result<Expression, ParseError> {
-        match self.tokens.next() {
-            Some(token) => match token.tt {
-                TokenType::Nil => Ok(Expression::Literal(Value::Nil)),
-                TokenType::True => Ok(Expression::Literal(Value::Boolean(true))),
-                TokenType::False => Ok(Expression::Literal(Value::Boolean(false))),
-                TokenType::Number => Ok(Expression::Literal(Value::Number(
-                    self.parse_number(token)?,
+    fn primary(&mut self) -> Result<Expression, Error> {
+        match self.next_token() {
+            Some(token) => match token.value {
+                Token::Nil => Ok(Expression::Literal(Value::Nil)),
+                Token::True => Ok(Expression::Literal(Value::Boolean(true))),
+                Token::False => Ok(Expression::Literal(Value::Boolean(false))),
+                Token::Number => Ok(Expression::Literal(Value::Number(
+                    self.parse_number(token.span)?,
                 ))),
-                TokenType::String => Ok(Expression::Literal(Value::String(
-                    self.parse_string(token)?,
+                Token::String => Ok(Expression::Literal(Value::String(
+                    self.parse_string(token.span)?,
                 ))),
-                TokenType::LeftParen => {
+                Token::LeftParen => {
                     let expression = self.expression()?;
-                    self.expect(TokenType::RightParen)?;
+                    self.expect(Token::RightParen)?;
                     Ok(Expression::Grouping(Box::new(expression)))
                 }
-                _ => Err(ParseError::ExpectedPrimary(Some(token))),
+                _ => Err(Error::ExpectedPrimary),
             },
-            None => Err(ParseError::ExpectedPrimary(None)),
+            None => Err(Error::ExpectedPrimary),
         }
     }
 
-    fn match_one_of<V>(&mut self, values: &[(TokenType, V)]) -> Option<V>
+    fn match_one_of<V>(&mut self, values: &[(Token, V)]) -> Option<V>
     where
         V: Copy,
     {
-        self.tokens.peek().copied().and_then(|token| {
+        self.tokens.peek().copied().and_then(|next| {
             for (tt, value) in values.iter() {
-                if *tt == token.tt {
-                    self.tokens.next();
+                if *tt == next.value {
+                    self.next_token();
                     return Some(*value);
                 }
             }
@@ -144,75 +147,88 @@ where
         })
     }
 
-    fn expect(&mut self, expected: TokenType) -> Result<(), ParseError> {
+    fn expect(&mut self, expected: Token) -> Result<(), Error> {
         match self.tokens.peek().copied() {
-            Some(token) if token.tt == expected => {
-                self.tokens.next();
+            Some(token) if token.value == expected => {
+                self.next_token();
                 Ok(())
             }
-            token => Err(ParseError::Expected(expected, token)),
+            _ => Err(Error::Expected(expected)),
         }
     }
 
-    fn parse_number(&self, token: Token) -> Result<f64, ParseError> {
-        self.input[token.span.start as usize..token.span.end as usize]
+    fn parse_number(&self, span: Span) -> Result<f64, Error> {
+        self.input[span.start as usize..span.end as usize]
             .parse()
-            .map_err(|_| ParseError::MalformedNumber(token))
+            .map_err(|_| Error::MalformedNumber)
     }
 
-    fn parse_string(&self, token: Token) -> Result<String, ParseError> {
-        let str = &self.input[token.span.start as usize..token.span.end as usize];
+    fn parse_string(&self, span: Span) -> Result<String, Error> {
+        let str = &self.input[span.start as usize..span.end as usize];
         if !str.ends_with('"') {
-            return Err(ParseError::MalformedString(token));
+            return Err(Error::MalformedString);
         }
         Ok(String::from(
-            &self.input[token.span.start as usize + 1..token.span.end as usize - 1],
+            &self.input[span.start as usize + 1..span.end as usize - 1],
         ))
     }
 
     fn synchronize(&mut self) {
-        while let Some(token) = self.tokens.next() {
-            if let TokenType::Semicolon = token.tt {
+        while let Some(token) = self.next_token() {
+            if let Token::Semicolon = token.value {
                 return;
             }
             match self.tokens.peek() {
-                Some(token) if starts_statement(token.tt) => {
+                Some(token) if starts_statement(token.value) => {
                     return;
                 }
                 _ => {}
             }
         }
     }
+
+    fn next_token(&mut self) -> Option<Spanned<Token>> {
+        self.tokens.next().map(|token| {
+            self.end = token.span.end;
+            token
+        })
+    }
 }
 
 impl<'a, I> Iterator for Parser<'a, I>
 where
-    I: Iterator<Item = Token>,
+    I: Iterator<Item = Spanned<Token>>,
 {
-    type Item = Result<Expression, ParseError>;
+    type Item = Spanned<Result<Expression, Error>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.tokens.peek().is_some() {
-            Some(self.expression().map_err(|error| {
+        self.tokens.peek().copied().map(|token| {
+            let start = token.span.start;
+            let result = self.expression();
+            if result.is_err() {
                 self.synchronize();
-                error
-            }))
-        } else {
-            None
-        }
+            }
+            Spanned {
+                value: result,
+                span: Span {
+                    start,
+                    end: self.end,
+                },
+            }
+        })
     }
 }
 
-fn starts_statement(tt: TokenType) -> bool {
+fn starts_statement(token: Token) -> bool {
     matches!(
-        tt,
-        TokenType::Class
-            | TokenType::If
-            | TokenType::Var
-            | TokenType::For
-            | TokenType::Fun
-            | TokenType::While
-            | TokenType::Print
-            | TokenType::Return
+        token,
+        Token::Class
+            | Token::If
+            | Token::Var
+            | Token::For
+            | Token::Fun
+            | Token::While
+            | Token::Print
+            | Token::Return
     )
 }

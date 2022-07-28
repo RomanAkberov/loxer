@@ -1,11 +1,24 @@
+use std::fmt::Debug;
+
 pub type Number = f64;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     String(String),
     Number(Number),
     Boolean(bool),
     Nil,
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String(string) => write!(f, "{}", string),
+            Self::Number(number) => write!(f, "{}", number),
+            Self::Boolean(boolean) => write!(f, "{}", boolean),
+            Self::Nil => write!(f, "nil"),
+        }
+    }
 }
 
 impl Value {

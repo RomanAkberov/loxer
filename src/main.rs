@@ -4,6 +4,7 @@ pub mod parser;
 pub mod scanner;
 pub mod span;
 pub mod value;
+pub mod vm;
 
 use std::io::{stdin, BufRead, BufReader};
 
